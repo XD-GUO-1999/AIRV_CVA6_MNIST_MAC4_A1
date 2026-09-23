@@ -1,3 +1,17 @@
+/*
+ * AIRV project modification - MAC4 Approach 1
+ *
+ * Integrates the custom MAC4 instruction into the quantized MNIST CNN
+ * inference software.
+ *
+ * Groups of four 8-bit inputs and four 8-bit weights are packed into 32-bit
+ * loads and processed by one MAC4 instruction. Alignment-aware fallback paths
+ * retain scalar MAC operations when a safe 32-bit load cannot be used.
+ *
+ * This version applies MAC4 to the convolution and fully connected layers
+ * while preserving the original network structure and activation flow.
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -28,6 +42,16 @@ static int clamp(int v, int lo, int hi) {
     }
 }
 
+/*
+ * MAC4-accelerated dot product.
+ *
+ * Four input bytes and four weight bytes are loaded into two 32-bit
+ * registers. One MAC4 instruction performs four multiplications and
+ * accumulates their sum into the running accumulator. Remaining elements
+ * are processed with scalar MAC operations.
+ *
+ * The 32-bit input and weight loads are expected to be aligned.
+ */
 static void macsOnRange_with_mac4(const UDATA_T* __restrict inputs,
                         const WDATA_T* __restrict weights,
                         SUM_T* __restrict weightedSum,
@@ -59,6 +83,13 @@ static void macsOnRange_with_mac4(const UDATA_T* __restrict inputs,
      *weightedSum = sum;
 }
 
+/*
+ * Alignment-safe MAC4 dot product.
+ *
+ * MAC4 is used only when both the input and weight pointers are 32-bit
+ * aligned. If either pointer is unaligned, the corresponding group of four
+ * elements falls back to scalar MAC operations.
+ */
 static void macsOnRange_no_alined(const UDATA_T* __restrict inputs,
                         const WDATA_T* __restrict weights,
                         SUM_T* __restrict weightedSum,
@@ -100,6 +131,14 @@ static void macsOnRange_no_alined(const UDATA_T* __restrict inputs,
      *weightedSum = sum;
 }
 
+/*
+ * FC2-specific MAC4 helper.
+ *
+ * FC2 may start from a weight address that is not 32-bit aligned. When the
+ * weight base address is aligned, MAC4 processes groups of four elements;
+ * otherwise the range falls back to scalar MAC operations. The FC2 input
+ * address is assumed to remain 32-bit aligned.
+ */
 static void macsOnRange_no_alined_for_fc2(const UDATA_T* __restrict inputs,
                         const WDATA_T* __restrict weights,
                         SUM_T* __restrict weightedSum,
@@ -215,48 +254,46 @@ static void convcellPropagate1(
         = (CHANNELS_WIDTH - KERNEL_WIDTH + STRIDE_X) / STRIDE_X;
 
     for (int oy = 0; oy < OUTPUTS_HEIGHT; ++oy) {
-        const int syMin = (PADDING_Y == 0) ? 0 //syMin is always 0, because there is no padding here
+        const int syMin = (PADDING_Y == 0) ? 0
             : max(PADDING_Y - (oy * STRIDE_Y), 0);
-        const int syMax = (PADDING_Y == 0 //syMax is always KERNEL_HEIGHT, because CHANNELS_HEIGHT + PADDING_Y - (oy * STRIDE_Y) >= KERNEL_HEIGHT
+        const int syMax = (PADDING_Y == 0
                 && OUTPUTS_HEIGHT == OUTPUTS_HEIGHT_NOPAD) ? KERNEL_HEIGHT
             : clamp(CHANNELS_HEIGHT + PADDING_Y - (oy * STRIDE_Y), 
-                    0, KERNEL_HEIGHT); //clamp helps us to know if CHANNELS_HEIGHT + PADDING_Y - (oy * STRIDE_Y) is between 0-KERNEL_HEIGHT
+                    0, KERNEL_HEIGHT);
         const int iy = (oy * STRIDE_Y) - PADDING_Y; 
 
         for (int ox = 0; ox < OUTPUTS_WIDTH; ++ox) {
-            for (int output = 0; output < NB_OUTPUTS; ++output) { //accoding to the number of output to define the loop number
-                // moved to inner loop for collapsing -->
-                const int sxMin = (PADDING_X == 0) ? 0 //syMin is always 0, because there is no padding here
+            for (int output = 0; output < NB_OUTPUTS; ++output) {
+                const int sxMin = (PADDING_X == 0) ? 0
                     : max(PADDING_X - (ox * STRIDE_X), 0);
-                const int sxMax = (PADDING_X == 0 //sxMax is always KERNEL_HEIGHT, because CHANNELS_WIDTH + PADDING_X - (ox * STRIDE_Y) >= KERNEL_WIDTH
+                const int sxMax = (PADDING_X == 0
                         && OUTPUTS_WIDTH == OUTPUTS_WIDTH_NOPAD)
                             ? KERNEL_WIDTH
                     : clamp(CHANNELS_WIDTH + PADDING_X - (ox * STRIDE_X), 
                             0, KERNEL_WIDTH);
                 const int ix = (ox * STRIDE_X) - PADDING_X;
 
-                const int oPos = (ox + OUTPUTS_WIDTH * oy); //output position
+                const int oPos = (ox + OUTPUTS_WIDTH * oy);
                 int oOffset = OUTPUT_MEM_STRIDE * oPos; 
 
                 if (OUTPUT_MEM_WRAP_SIZE > 0 && oOffset >= OUTPUT_MEM_CONT_SIZE) {
                     oOffset += OUTPUT_MEM_WRAP_OFFSET - OUTPUT_MEM_CONT_OFFSET
                                 - OUTPUT_MEM_CONT_SIZE;
                 }
-                // when the oOffset surpasses the size of OUTPUT_MEM_CONT_SIZE and there is wapping memory, adjust oOffset into wapping memory
-                // <--
+                // Remap the output offset when the contiguous memory region wraps.
 
-                SUM_T weightedSum = biasses[output]; // add biasses of kernel firstly
+                SUM_T weightedSum = biasses[output];  // Initialize the accumulator with the output bias.
 
-                for (int sy = 0; sy < KERNEL_HEIGHT; ++sy) { //in the kernel, start by line
+                for (int sy = 0; sy < KERNEL_HEIGHT; ++sy) {
                     if ((PADDING_Y != 0
                             || OUTPUTS_HEIGHT != OUTPUTS_HEIGHT_NOPAD)
                         && sy >= syMax - syMin)
                     {
-                        break; // when there is padding and sy surpass the size of kernel, break
+                        break;  // This kernel row lies outside the valid input region.
                     }
 
                     const int iPos = ((sxMin + ix)
-                                        + CHANNELS_WIDTH * (iy + syMin + sy)); // calculate the input position
+                                        + CHANNELS_WIDTH * (iy + syMin + sy));
                     int iOffset = INPUT_MEM_STRIDE * iPos;
 
                     // Wrapping cannot occur in the middle of a line, except if
@@ -269,26 +306,23 @@ static void convcellPropagate1(
                         iOffset += INPUT_MEM_WRAP_OFFSET - INPUT_MEM_CONT_OFFSET
                                     - INPUT_MEM_CONT_SIZE;
                     }
-                     // when the iOffset surpasses the size of INTPUT_MEM_CONT_SIZE and there is wapping memory, adjust iOffset into wapping memory
                     else if (INPUT_MEM_WRAP_SIZE > 0 && KERNEL_WIDTH > 1
                         && CHANNELS_HEIGHT == 1 // single line (1D)!
                         && iOffset + KERNEL_WIDTH * NB_CHANNELS
                             > INPUT_MEM_CONT_SIZE)
                     {
-                        wrapInRange = true;//when there is wrapping memory, the size of kernel is not 1*1, the input is 1D, 
-                                        //and ioffset + a line of data in kernel surpass the continue size,
-                                        //the wrapInRange will be true, which means that the data in memory is not continue
-                                        //it will surpass the boundary of contiguous memory
+                        // The requested 1D range crosses the end of the contiguous region.
+                        wrapInRange = true;
                     }
 
                     const int wOffset = NB_CHANNELS * (sxMin
                         + KERNEL_WIDTH * (syMin + sy + KERNEL_HEIGHT * output));
 
-                    if (!wrapInRange && (NB_CHANNELS == INPUT_MEM_STRIDE //it does not surpass the boundary of contiguous memory, there is no gap between
-                                                                         // two pixels
-                        && ((PADDING_X == 0 && OUTPUTS_WIDTH == OUTPUTS_WIDTH_NOPAD) // there is no padding
-                                || sxMax - sxMin == KERNEL_WIDTH)))                  // or there is padding but the kernel is not cut by the padding (the kernel is whole)
-                                                                                     // to make sure the kernel in x is valid, we can use fonction direcetly
+                    // Use one contiguous MAC range when pixels are tightly packed and
+                    // the horizontal kernel is fully valid.
+                    if (!wrapInRange && (NB_CHANNELS == INPUT_MEM_STRIDE
+                        && ((PADDING_X == 0 && OUTPUTS_WIDTH == OUTPUTS_WIDTH_NOPAD)
+                                || sxMax - sxMin == KERNEL_WIDTH)))
                     {
                         macsOnRange_no_alined(
                             inputs + iOffset, 
@@ -302,7 +336,7 @@ static void convcellPropagate1(
                                     || OUTPUTS_WIDTH != OUTPUTS_WIDTH_NOPAD)
                                 && sx >= sxMax - sxMin)
                             {
-                                break; // when there is padding and sy surpass the size of kernel, break
+                                break;  // This kernel row lies outside the valid input region.
                             }
 
                             int iOffsetInRange = iOffset
@@ -318,8 +352,8 @@ static void convcellPropagate1(
 
                             macsOnRange_no_alined(
                                 // same input line so no wrapping can occur
-                                inputs + iOffsetInRange,  //index of input in memory
-                                weights + wOffset + sx * NB_CHANNELS,  //index of weight in memory
+                                inputs + iOffsetInRange,
+                                weights + wOffset + sx * NB_CHANNELS,
                                 &weightedSum,
                                 NB_CHANNELS);
                         }
@@ -377,7 +411,6 @@ static void convcellPropagate2(
 
         for (int ox = 0; ox < OUTPUTS_WIDTH; ++ox) {
             for (int output = 0; output < NB_OUTPUTS; ++output) {
-                // moved to inner loop for collapsing -->
                 const int sxMin = (PADDING_X == 0) ? 0
                     : max(PADDING_X - (ox * STRIDE_X), 0);
                 const int sxMax = (PADDING_X == 0
@@ -840,5 +873,4 @@ float Network::backpropagate(const DATA_T* input, const std::int32_t* labels){
 int Network::gradientCheck(){
    return(0);
 }*/
-
 

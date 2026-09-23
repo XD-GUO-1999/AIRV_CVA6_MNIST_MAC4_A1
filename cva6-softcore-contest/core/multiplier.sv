@@ -14,6 +14,20 @@
 //              This unit relies on retiming features of the synthesizer
 //
 
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// Implements the arithmetic datapath for MAC4.
+//
+//   operand_a_i : four packed unsigned 8-bit input values
+//   operand_b_i : four packed signed 8-bit weight values
+//   operand_c_i : previous 32-bit rd value used as the accumulator
+//
+//   result = operand_c_i
+//          + a0*b0 + a1*b1 + a2*b2 + a3*b3
+//
+// The result follows the existing multiplier pipeline and is written back to rd.
+// -----------------------------------------------------------------------------
 
 module multiplier
   import ariane_pkg::*;
@@ -27,7 +41,7 @@ module multiplier
     input  fu_op                             operation_i,
     input  riscv::xlen_t                     operand_a_i,
     input  riscv::xlen_t                     operand_b_i,
-    input  riscv::xlen_t                     operand_c_i, //modification: add a 3rd operand for MAC4 instruction, which is used to store the accumulator value
+    input  riscv::xlen_t                     operand_c_i, // Third operand; carries the previous rd value for MAC4
     output riscv::xlen_t                     result_o,
     output logic                             mult_valid_o,
     output logic                             mult_ready_o,
@@ -73,7 +87,20 @@ module multiplier
   fu_op operator_d, operator_q;
   logic [riscv::XLEN*2-1:0] mult_result_d, mult_result_q;
 
-  //modification the logic calculate of MAC4
+  // ------------------------------------------------------------------
+  // MAC4 datapath
+  //
+  // operand_a_i packs four unsigned 8-bit input values.
+  // operand_b_i packs four signed 8-bit weight values.
+  // operand_c_i contains the signed 32-bit accumulator (previous rd).
+  //
+  // MAC4 computes:
+  //   result = accumulator
+  //          + input[0] * weight[0]
+  //          + input[1] * weight[1]
+  //          + input[2] * weight[2]
+  //          + input[3] * weight[3]
+  // ------------------------------------------------------------------
   logic [31:0] mac4_res_d, mac4_res_q;
 
   assign mac4_res_d = ($signed({1'b0, operand_a_i[7:0]})*$signed(operand_b_i[7:0])) + 
@@ -125,7 +152,7 @@ module multiplier
 
   always_comb begin : p_selmux
     unique case (operator_q)
-      ariane_pkg::MAC4:    result_o = mac4_res_q; //modification: output of mac4
+      ariane_pkg::MAC4:    result_o = mac4_res_q;  // Registered MAC4 result
       MULH, MULHU, MULHSU: result_o = mult_result_q[riscv::XLEN*2-1:riscv::XLEN];
       MULW:                result_o = sext32(mult_result_q[31:0]);
       CLMUL:               result_o = clmul_q;

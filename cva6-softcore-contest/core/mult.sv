@@ -1,3 +1,13 @@
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// Routes the custom MAC4 operation through the existing CVA6 multiplier
+// functional unit. The third operand path (fu_data_i.imm) is reused to carry
+// the previous value of rd from the issue stage to the multiplier.
+//
+// MAC4 is handled alongside the standard multiplication operations.
+// -----------------------------------------------------------------------------
+
 
 
 module mult
@@ -26,9 +36,9 @@ module mult
   logic div_valid_op;
   logic mul_valid_op;
   // Input Arbitration
-//modification : add MAC4 instruction to the valid operation list, which is a custom instruction for CVA6
+  // MAC4 is executed by the multiplier datapath together with the
+  // standard multiplication operations.
   assign mul_valid_op = ~flush_i && mult_valid_i && (fu_data_i.operation inside { MUL, MULH, MULHU, MULHSU, MULW, CLMUL, CLMULH, CLMULR, ariane_pkg::MAC4 });
-//////
   assign div_valid_op = ~flush_i && mult_valid_i && (fu_data_i.operation inside { DIV, DIVU, DIVW, DIVUW, REM, REMU, REMW, REMUW });
 
   // ---------------------
@@ -55,7 +65,9 @@ module mult
       .operation_i    (fu_data_i.operation),
       .operand_a_i    (fu_data_i.operand_a),
       .operand_b_i    (fu_data_i.operand_b),
-      .operand_c_i    (fu_data_i.imm),//modification use imm to store 3rd data
+      // For MAC4, fu_data_i.imm carries the previous value of rd.
+      // The issue stage reuses this third-operand datapath for the accumulator.
+      .operand_c_i    (fu_data_i.imm),
       .result_o       (mul_result),
       .mult_valid_i   (mul_valid_op),
       .mult_valid_o   (mul_valid),

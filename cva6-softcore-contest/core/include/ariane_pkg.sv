@@ -16,6 +16,17 @@
  *              in one package.
  */
 
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// Adds MAC4 to the CVA6 functional-unit operation enumeration.
+// MAC4 performs four parallel 8-bit multiplications and accumulates the
+// products into the previous value of rd.
+//
+// This file only declares the MAC4 operation identifier; decoding, operand
+// collection, and arithmetic execution are implemented in the corresponding
+// decoder, issue/read-operands, and multiplier modules.
+// -----------------------------------------------------------------------------
 // this is needed to propagate the
 // configuration in case Ariane is
 // instantiated in OpenPiton
@@ -443,9 +454,8 @@ package ariane_pkg;
     MULHU,
     MULHSU,
     MULW,
-    //modification: add MAC4 instruction to the fu_op enum, which is a custom instruction for CVA6
+    // MAC4: four parallel 8-bit multiplications accumulated into rd.
     MAC4,
-    //////
   
     // Divisions
     DIV,

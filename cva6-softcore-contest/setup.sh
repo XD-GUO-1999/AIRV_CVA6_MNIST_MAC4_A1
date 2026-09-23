@@ -22,8 +22,8 @@ export PATH="$PATH:/opt/Xilinx/Vivado/2024.1/xsct-trim/bin"
 # =========================
 
 # License server
-export MGLS_LICENSE_FILE="27005@licence-01.imta.fr"
-export LM_LICENSE_FILE="27005@licence-01.imta.fr"
+export MGLS_LICENSE_FILE="29000@eda-lic.imta.fr"
+export LM_LICENSE_FILE="29000@eda-lic.imta.fr"
 
 # Questa installation path
 export QUESTA_PATH="/opt/Questa/questasim"

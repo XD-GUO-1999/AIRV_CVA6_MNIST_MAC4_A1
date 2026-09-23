@@ -20,6 +20,17 @@
    along with this program; see the file COPYING3. If not,
    see <http://www.gnu.org/licenses/>.  */
 
+/*
+ * AIRV project modification - MAC4 Approach 1
+ *
+ * Registers the custom MAC4 mnemonic in the RISC-V opcode table so that
+ * GNU assembler and objdump can assemble and disassemble:
+ *
+ *     mac4 rd, rs1, rs2
+ *
+ * The architectural destination rd is also reused by the CVA6 hardware
+ * as the accumulator source.
+ */
 #include "sysdep.h"
 #include "opcode/riscv.h"
 #include <stdio.h>
@@ -319,9 +330,11 @@ const struct riscv_opcode riscv_opcodes[] =
 {"pause",       0, INSN_CLASS_ZIHINTPAUSE, "", MATCH_PAUSE, MASK_PAUSE, match_opcode, 0 },
 
 /* Basic RVI instructions and aliases.  */
-//modification : definition of the mac4 instruction
+/*
+ * Custom MAC4 instruction. The assembler exposes rd, rs1 and rs2.
+ * In hardware, rd is also read as the accumulator source.
+ */
 {"mac4",        0, INSN_CLASS_I, "d,s,t",     MATCH_MAC4, MASK_MAC4, match_opcode, 0 },
-/////
 {"unimp",       0, INSN_CLASS_C, "",          0, 0xffffU, match_opcode, INSN_ALIAS },
 {"unimp",       0, INSN_CLASS_I, "",          MATCH_CSRRW|(CSR_CYCLE << OP_SH_CSR), 0xffffffffU,  match_opcode, 0 }, /* csrw cycle, x0  */
 {"ebreak",      0, INSN_CLASS_C, "",          MATCH_C_EBREAK, MASK_C_EBREAK, match_opcode, INSN_ALIAS },

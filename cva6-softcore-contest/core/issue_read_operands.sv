@@ -13,6 +13,16 @@
 // Description: Issues instruction from the scoreboard and fetches the operands
 //              This also includes all the forwarding logic
 
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// Extends operand collection for MAC4 so that the current value of rd can be
+// read as a third source operand in addition to rs1 and rs2.
+//
+// The third GPR read port is used for rd, and the existing third-operand / imm
+// datapath carries this accumulator value toward the multiplier. Scoreboard
+// hazard detection and forwarding are also applied to this rd source.
+// -----------------------------------------------------------------------------
 
 module issue_read_operands
   import ariane_pkg::*;
@@ -164,12 +174,15 @@ module issue_read_operands
     // operand forwarding signals
     forward_rs1 = 1'b0;
     forward_rs2 = 1'b0;
-    forward_rs3 = 1'b0;  // FPR only
+    forward_rs3 = 1'b0;  // Third-operand forwarding (FPR, OFFLOAD, or MAC4)
     // poll the scoreboard for those values
     rs1_o = issue_instr_i.rs1;
     rs2_o = issue_instr_i.rs2;
-    //modification: use the rd as 3rd regisiter if we use mac4
-    rs3_o = (issue_instr_i.op == ariane_pkg::MAC4) ? issue_instr_i.rd[REG_ADDR_SIZE-1:0] : issue_instr_i.result[REG_ADDR_SIZE-1:0]; 
+    // MAC4 uses rd as an additional source operand. Read the current
+    // rd value through the third register-file port before it is overwritten.
+    rs3_o = (issue_instr_i.op == ariane_pkg::MAC4) ?
+              issue_instr_i.rd[REG_ADDR_SIZE-1:0] :
+              issue_instr_i.result[REG_ADDR_SIZE-1:0];
 
     // 0. check that we are not using the zimm type in RS1
     //    as this is an immediate we do not have to wait on anything here
@@ -207,15 +220,16 @@ module issue_read_operands
       end
     end
 
-    // Only check clobbered gpr for OFFLOADED instruction
+    // Check data hazards for the third register operand. For MAC4 the
+    // third operand is rd; for OFFLOAD it is carried in instruction.result.
+    // If an older instruction still produces this register, forward it when
+    // available; otherwise stall until the value is ready.
     if ((CVA6Cfg.FpPresent && is_imm_fpr(
             issue_instr_i.op
         )) ? rd_clobber_fpr_i[issue_instr_i.result[REG_ADDR_SIZE-1:0]] != NONE :
-        //modification : when we use MAC4 and offload, judge rd_clobber_gpr_i is avaliable or not
             (issue_instr_i.op == OFFLOAD || issue_instr_i.op == ariane_pkg::MAC4) && CVA6Cfg.NrRgprPorts == 3 ?
             rd_clobber_gpr_i[(issue_instr_i.op == ariane_pkg::MAC4) ? issue_instr_i.rd[REG_ADDR_SIZE-1:0] : issue_instr_i.result[REG_ADDR_SIZE-1:0]] != NONE : 0) begin
-        //modification : when we use MAC4 and offload, judge rs3 is avaliable or not
-      // if the operand is available, forward it. CSRs don't write to/from FPR so no need to check
+      // Forward the third operand if the pending value is already available.
       if (rs3_valid_i) begin
         forward_rs3 = 1'b1;
       end else begin  // the operand is not available -> stall
@@ -236,12 +250,14 @@ module issue_read_operands
     // default is regfiles (gpr or fpr)
     operand_a_n = operand_a_regfile;
     operand_b_n = operand_b_regfile;
-    // immediates are the third operands in the store case
-    // for FP operations, the imm field can also be the third operand from the regfile
+    // Immediates are the third operands in the store case. For FP
+    // operations, the imm field can also carry a third register operand.
+    // MAC4 reuses the same datapath: operand_c_regfile is the old rd value
+    // and is transported through imm_n toward the multiplier.
     if (CVA6Cfg.NrRgprPorts == 3) begin
       imm_n = (CVA6Cfg.FpPresent && is_imm_fpr(issue_instr_i.op)) ?
           {{riscv::XLEN - CVA6Cfg.FLen{1'b0}}, operand_c_regfile} :
-          (issue_instr_i.op == OFFLOAD || issue_instr_i.op == ariane_pkg::MAC4) ? operand_c_regfile : issue_instr_i.result; //modification : ajout MAC4
+          (issue_instr_i.op == OFFLOAD || issue_instr_i.op == ariane_pkg::MAC4) ? operand_c_regfile : issue_instr_i.result;
     end else begin
       imm_n = (CVA6Cfg.FpPresent && is_imm_fpr(issue_instr_i.op)) ?
           {{riscv::XLEN - CVA6Cfg.FLen{1'b0}}, operand_c_regfile} : issue_instr_i.result;
@@ -442,8 +458,13 @@ module issue_read_operands
   logic [CVA6Cfg.NrCommitPorts-1:0][riscv::XLEN-1:0] wdata_pack;
   logic [CVA6Cfg.NrCommitPorts-1:0]                  we_pack;
 
+  // Register-file read-port mapping:
+  //   port 0 -> rs1
+  //   port 1 -> rs2
+  //   port 2 -> rd for MAC4, otherwise the regular third operand
+  // MAC4 therefore reads rs1, rs2 and the previous rd value in parallel.
   if (CVA6Cfg.NrRgprPorts == 3) begin : gen_rs3
-    assign raddr_pack = {issue_instr_i.op == ariane_pkg::MAC4} ? //modification if we use MAC4, the 3rd port should read rd to load rs3
+    assign raddr_pack = (issue_instr_i.op == ariane_pkg::MAC4) ?
                         {issue_instr_i.rd[4:0], issue_instr_i.rs2[4:0], issue_instr_i.rs1[4:0]} :
                         {issue_instr_i.result[4:0], issue_instr_i.rs2[4:0], issue_instr_i.rs1[4:0]};
   end else begin : gen_no_rs3
@@ -585,11 +606,11 @@ module issue_read_operands
 
   //pragma translate_off
   initial begin
-    assert (CVA6Cfg.NrRgprPorts == 2 || CVA6Cfg.NrRgprPorts == 3) //&& CVA6Cfg.CvxifEn)) //modification : delete CVXIFEn, because it's not necessary to check CVXIFEn, if we use 3 read ports, it can be used for CVXIF
+    assert (CVA6Cfg.NrRgprPorts == 2 || CVA6Cfg.NrRgprPorts == 3)
     else
       $fatal(
           1,
-          "If CVXIF is enable, ariane regfile can have either 2 or 3 read ports. Else it has 2 read ports."
+          "The CVA6 integer register file must provide either 2 or 3 read ports."
       );
   end
 
@@ -602,5 +623,4 @@ module issue_read_operands
 
   //pragma translate_on
 endmodule
-
 

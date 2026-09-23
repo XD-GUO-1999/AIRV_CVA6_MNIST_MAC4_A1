@@ -19,6 +19,21 @@
 //              This also includes all the forwarding logic
 //
 
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// Adds decode support for the custom MAC4 instruction.
+//
+// Encoding:
+//   opcode = 0001011 (CUSTOM-0)
+//   funct3 = 001
+//   funct7 = 0000000
+//
+// rs1 and rs2 carry four packed 8-bit inputs/weights. rd is also read as an
+// accumulator source through the additional register-file read path.
+// The operation is dispatched to the MULT functional unit.
+// -----------------------------------------------------------------------------
+
 module decoder
   import ariane_pkg::*;
 #(
@@ -1186,23 +1201,32 @@ module decoder
           instruction_o.fu      = ALU;
           instruction_o.rd[4:0] = instr.utype.rd;
         end
-// ↓↓↓ Modification ↓↓↓
-        // Let the cup realize custom instruction MAC4 (Opcode: 0001011)
-        7'b0001011: begin 
-          imm_select             = RS3;             // use RS3 to fetch the accumulator
-          instruction_o.fu       = MULT;            // Dispatch the task to the Multiplier unit
-          instruction_o.rs1[4:0] = instr.rtype.rs1; // Extract source register 1 (t1)
-          instruction_o.rs2[4:0] = instr.rtype.rs2; // Extract source register 2 (t2)
-          instruction_o.rd[4:0]  = instr.rtype.rd;  // Extract destination register (sum)
+        // ------------------------------------------------------------------
+        // Custom MAC4 instruction
+        //
+        // Encoding: opcode=0001011 (CUSTOM-0), funct3=001, funct7=0000000.
+        // rs1 contains four packed unsigned 8-bit inputs.
+        // rs2 contains four packed signed 8-bit weights.
+        // rd is also read as the accumulator source and receives the result.
+        //
+        // RS3 selects the additional register-file operand path used to read
+        // the current value of rd.
+        // ------------------------------------------------------------------
+        7'b0001011: begin
+          imm_select             = RS3;
+          instruction_o.fu       = MULT;
+          instruction_o.rs1[4:0] = instr.rtype.rs1;
+          instruction_o.rs2[4:0] = instr.rtype.rs2;
+          instruction_o.rd[4:0]  = instr.rtype.rd;
 
-          // Check if funct3 is 000 as specified
-          if (instr.rtype.funct3 == 3'b001) begin
-            instruction_o.op = ariane_pkg::MAC4;  // Attach the DOT8 label we registered in ariane_pkg
+          // Keep the RTL decoder consistent with the assembler encoding.
+          if ((instr.rtype.funct3 == 3'b001) &&
+              (instr.rtype.funct7 == 7'b0000000)) begin
+            instruction_o.op = ariane_pkg::MAC4;
           end else begin
-            illegal_instr = 1'b1;                 // If funct3 is incorrect, trigger an illegal instruction exception
+            illegal_instr = 1'b1;
           end
         end
-        // ↑↑↑ Modification ↑↑↑
         default: illegal_instr = 1'b1;
       endcase
     end

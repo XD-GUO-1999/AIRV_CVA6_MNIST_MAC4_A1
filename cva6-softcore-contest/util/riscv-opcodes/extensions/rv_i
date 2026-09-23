@@ -1,5 +1,17 @@
 # rv_i
 
+# AIRV project modification - MAC4 Approach 1
+#
+# Adds the custom MAC4 instruction definition used to generate the RISC-V
+# opcode encoding support for the modified toolchain.
+#
+# Syntax:
+#   mac4 rd, rs1, rs2
+#
+# Hardware semantics:
+#   rd = rd + four parallel 8-bit input/weight products
+#
+
 lui     rd imm20 6..2=0x0D 1..0=3
 auipc   rd imm20 6..2=0x05 1..0=3
 jal     rd jimm20                          6..2=0x1b 1..0=3
@@ -24,9 +36,11 @@ sltiu   rd rs1 imm12           14..12=3 6..2=0x04 1..0=3
 xori    rd rs1 imm12           14..12=4 6..2=0x04 1..0=3
 ori     rd rs1 imm12           14..12=6 6..2=0x04 1..0=3
 andi    rd rs1 imm12           14..12=7 6..2=0x04 1..0=3
-#modification : definition of the mac4 instruction
+# Custom MAC4 instruction
+# Encoding: funct7=0000000, funct3=001, opcode=0001011 (CUSTOM-0)
+# Syntax: mac4 rd, rs1, rs2
+# The CVA6 hardware also reads rd as the accumulator source.
 mac4     rd rs1 rs2 31..25=0  14..12=1 6..2=0x02 1..0=3
-#modification
 add     rd rs1 rs2 31..25=0  14..12=0 6..2=0x0C 1..0=3
 sub     rd rs1 rs2 31..25=32 14..12=0 6..2=0x0C 1..0=3
 sll     rd rs1 rs2 31..25=0  14..12=1 6..2=0x0C 1..0=3

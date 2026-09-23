@@ -12,6 +12,15 @@
 // Date: 19.03.2017
 // Description: CVA6 Top-level module
 
+// -----------------------------------------------------------------------------
+// AIRV project modification - MAC4 Approach 1
+//
+// MAC4 uses rd as both the accumulator source and destination. To read
+// rs1, rs2, and the previous rd value in parallel, the integer register file
+// is configured with a third read port.
+//
+// The remaining CVA6 structure is unchanged by this modification.
+// -----------------------------------------------------------------------------
 
 module cva6
   import ariane_pkg::*;
@@ -161,7 +170,10 @@ module cva6
   localparam bit EnableAccelerator = CVA6Cfg.RVV;  // Currently only used by V extension (Ara)
   localparam int unsigned NrWbPorts = (CVA6Cfg.CvxifEn || EnableAccelerator) ? 5 : 4;
 
-  localparam NrRgprPorts = 3;//modification : add a read port for rs3, which is used to fetch the accumulator for MAC4 instruction
+  // MAC4 reuses rd as both the accumulator source and the destination.
+  // A third GPR read port is required to read the current rd value in
+  // parallel with rs1 and rs2.
+  localparam NrRgprPorts = 3;
 
   localparam config_pkg::cva6_cfg_t CVA6ExtendCfg = {
     CVA6Cfg.NrCommitPorts,

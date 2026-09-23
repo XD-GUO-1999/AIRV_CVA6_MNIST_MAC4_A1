@@ -18,13 +18,37 @@
    along with this program; see the file COPYING3. If not,
    see <http://www.gnu.org/licenses/>.  */
 
+/*
+ * AIRV project modification - MAC4 Approach 1
+ *
+ * Adds the assembler/disassembler encoding constants for the custom MAC4
+ * instruction used by the CVA6 MNIST accelerator.
+ *
+ * MAC4 syntax:
+ *     mac4 rd, rs1, rs2
+ *
+ * Hardware semantics:
+ *     rd = rd + sum_{i=0..3}(u8(rs1[i]) * s8(rs2[i]))
+ *
+ * The current value of rd is read by the processor as an additional
+ * accumulator source operand.
+ */
 #ifndef RISCV_ENCODING_H
 #define RISCV_ENCODING_H
 /* Instruction opcode macros.  */
-//modifcation: add mac4 mask and match
+/*
+ * Custom MAC4 instruction encoding.
+ *
+ * MAC4 uses an R-type encoding in the CUSTOM-0 opcode space.
+ * Software syntax:
+ *
+ *     mac4 rd, rs1, rs2
+ *
+ * The CVA6 implementation additionally reads the current value of rd
+ * and uses it as the accumulator input.
+ */
 #define MATCH_MAC4 0x100b
-#define MASK_MAC4 0xfe00707f
-////
+#define MASK_MAC4  0xfe00707f
 #define MATCH_SLLI_RV32 0x1013
 #define MASK_SLLI_RV32  0xfe00707f
 #define MATCH_SRLI_RV32 0x5013
@@ -2787,9 +2811,8 @@
 #define CSR_VLENB 0xc22
 #endif /* RISCV_ENCODING_H */
 #ifdef DECLARE_INSN
-//modification : mac4 declaration
+/* Expose MAC4 to the RISC-V assembler/disassembler. */
 DECLARE_INSN(mac4, MATCH_MAC4, MASK_MAC4)
-////
 DECLARE_INSN(slli_rv32, MATCH_SLLI_RV32, MASK_SLLI_RV32)
 DECLARE_INSN(srli_rv32, MATCH_SRLI_RV32, MASK_SRLI_RV32)
 DECLARE_INSN(srai_rv32, MATCH_SRAI_RV32, MASK_SRAI_RV32)
